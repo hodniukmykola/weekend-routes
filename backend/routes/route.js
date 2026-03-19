@@ -1,6 +1,7 @@
 const express = require("express")
 const router = express.Router()
 const Place = require("../models/Place")
+const { extractSmartTags } = require("../utils/tagParser")
 
 function getDistance(a, b) {
   if (
@@ -74,15 +75,15 @@ function buildGoogleMapsUrl(route) {
   return url
 }
 
-function buildDescription(city, tags, places) {
+function buildDescription(city, smartTags, places) {
   if (!places.length) {
     return `На жаль, для міста ${city} не знайдено локацій за вибраними інтересами.`
   }
 
-  const tagsText = tags.length ? tags.join(", ") : "загальної прогулянки"
+  const tagsText = smartTags.length ? smartTags.join(", ") : "вільної прогулянки"
   const names = places.map((place) => place.name).join(" → ")
 
-  return `Маршрут по місту ${city} сформовано з урахуванням інтересів: ${tagsText}. Спочатку система відібрала найкращі локації за рейтингом, після чого побудувала логічну послідовність відвідування. Рекомендований порядок прогулянки: ${names}.`
+  return `Маршрут по місту ${city} сформовано на основі розпізнаних інтересів: ${tagsText}. Система автоматично визначила відповідні теги, відібрала локації з найвищим рейтингом, а потім побудувала послідовний маршрут прогулянки: ${names}.`
 }
 
 router.get("/", async (req, res) => {
@@ -96,17 +97,17 @@ router.get("/", async (req, res) => {
       })
     }
 
-    const tags = rawTags
-      .split(",")
-      .map((tag) => tag.trim().toLowerCase())
-      .filter(Boolean)
+    const smartTags = extractSmartTags(rawTags)
+
+    console.log("Введений текст:", rawTags)
+    console.log("Розпізнані теги:", smartTags)
 
     const query = {
-      city: city
+      city: new RegExp(`^${city}$`, "i")
     }
 
-    if (tags.length > 0) {
-      query.tags = { $in: tags }
+    if (smartTags.length > 0) {
+      query.tags = { $in: smartTags }
     }
 
     let places = await Place.find(query)
@@ -115,29 +116,27 @@ router.get("/", async (req, res) => {
       return res.json({
         places: [],
         description: `На жаль, для міста ${city} не знайдено локацій за вибраними інтересами.`,
-        googleMapsUrl: ""
+        googleMapsUrl: "",
+        smartTags
       })
     }
 
-    // 1. Спочатку сортуємо по рейтингу
     places.sort((a, b) => (b.rating || 0) - (a.rating || 0))
-
-    // 2. Беремо топ-5
     places = places.slice(0, 5)
 
-    // 3. Потім будуємо маршрут
     const orderedRoute = buildRouteByNearestNeighbor(places).map((place, index) => ({
       ...place.toObject(),
       order: index + 1
     }))
 
-    const description = buildDescription(city, tags, orderedRoute)
+    const description = buildDescription(city, smartTags, orderedRoute)
     const googleMapsUrl = buildGoogleMapsUrl(orderedRoute)
 
     res.json({
       places: orderedRoute,
       description,
-      googleMapsUrl
+      googleMapsUrl,
+      smartTags
     })
   } catch (error) {
     console.error(error)
