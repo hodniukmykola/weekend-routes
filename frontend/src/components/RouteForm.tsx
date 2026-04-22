@@ -20,10 +20,11 @@ type Place = {
 
 export default function RouteForm() {
   const [city, setCity] = useState("Чернівці")
-  const [tags, setTags] = useState("кава")
+  const [tags, setTags] = useState("хочу перекусити")
   const [places, setPlaces] = useState<Place[]>([])
   const [routeDescription, setRouteDescription] = useState("")
   const [googleMapsUrl, setGoogleMapsUrl] = useState("")
+  const [smartTags, setSmartTags] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
@@ -33,18 +34,21 @@ export default function RouteForm() {
     setError("")
     setRouteDescription("")
     setGoogleMapsUrl("")
+    setSmartTags([])
 
     try {
       const response = await api.get("/route", {
         params: {
           city,
-          tags
+          tags,
+          limit: 8
         }
       })
 
       setPlaces(response.data.places || [])
       setRouteDescription(response.data.description || "")
       setGoogleMapsUrl(response.data.googleMapsUrl || "")
+      setSmartTags(response.data.smartTags || [])
     } catch (err) {
       setError("Не вдалося побудувати маршрут")
       console.error(err)
@@ -67,41 +71,36 @@ export default function RouteForm() {
             <p className="badge">Маршрут вихідного дня по Чернівцях</p>
 
             <h1>
-              Побудуй готовий
+              Розумний маршрут
               <br />
-              маршрут містом,
+              за твоїм
               <br />
-              а не просто список
-              <br />
-              локацій
+              звичайним текстом
             </h1>
 
             <p className="subtitle">
-              Система спочатку обирає найкращі місця за рейтингом, а потім
-              формує логічну послідовність для прогулянки.
+              Напиши як людина: “хочу перекусити”, “хочу прогулятись і випити кави”,
+              “цікавить старе місто” — система сама визначить категорії.
             </p>
 
             <div className="quick-tags">
-              <button type="button" onClick={() => applyTag("архітектура")}>
-                Архітектура
+              <button type="button" onClick={() => applyTag("хочу перекусити")}>
+                Хочу перекусити
               </button>
-              <button type="button" onClick={() => applyTag("кава")}>
-                Кава
-              </button>
-              <button type="button" onClick={() => applyTag("історія")}>
-                Історія
-              </button>
-              <button type="button" onClick={() => applyTag("прогулянка")}>
-                Прогулянка
-              </button>
-              <button type="button" onClick={() => applyTag("архітектура,кава")}>
-                Архітектура + кава
+              <button type="button" onClick={() => applyTag("хочу випити кави")}>
+                Хочу кави
               </button>
               <button
                 type="button"
-                onClick={() => applyTag("архітектура,прогулянка")}
+                onClick={() => applyTag("хочу прогулятись і випити кави")}
               >
-                Архітектура + прогулянка
+                Прогулянка + кава
+              </button>
+              <button
+                type="button"
+                onClick={() => applyTag("цікавить старе місто і красиві будівлі")}
+              >
+                Старе місто
               </button>
             </div>
 
@@ -115,7 +114,7 @@ export default function RouteForm() {
 
               <input
                 type="text"
-                placeholder="Інтереси, наприклад архітектура,кава,прогулянка"
+                placeholder="Наприклад: хочу перекусити"
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
               />
@@ -123,86 +122,24 @@ export default function RouteForm() {
               <button type="submit">Побудувати маршрут</button>
             </form>
 
-            {loading && <p className="info">Маршрут будується...</p>}
+            {loading && <p className="info">Система аналізує запит і будує маршрут...</p>}
             {error && <p className="error">{error}</p>}
-
-            <div className="hero-stats">
-              <div className="stat-card">
-                <span className="stat-number">5</span>
-                <span className="stat-label">локацій у маршруті</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-number">1</span>
-                <span className="stat-label">день для прогулянки</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-number">★</span>
-                <span className="stat-label">відбір за рейтингом</span>
-              </div>
-            </div>
           </div>
         </div>
       </section>
 
-      <section className="about-city">
-        <h2>Чому саме Чернівці?</h2>
-
-        <div className="about-grid">
-          <div className="about-card">
-            <h3>Європейська архітектура</h3>
-            <p>
-              Чернівці відомі своєю австро-угорською архітектурою, вузькими
-              вуличками та історичними будівлями.
-            </p>
+      {smartTags.length > 0 && (
+        <section className="smart-tags-section">
+          <h2>Розпізнані категорії</h2>
+          <div className="smart-tags-box">
+            {smartTags.map((tag) => (
+              <span key={tag} className="smart-tag">
+                {tag}
+              </span>
+            ))}
           </div>
-
-          <div className="about-card">
-            <h3>Кавова культура</h3>
-            <p>
-              У центрі міста багато затишних кав'ярень, де можна відпочити після
-              прогулянки.
-            </p>
-          </div>
-
-          <div className="about-card">
-            <h3>Ідеально для маршруту</h3>
-            <p>
-              Компактний центр, площі, парки та пам’ятки дозволяють легко
-              побудувати маршрут на один день.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="interests">
-        <h2>Популярні інтереси</h2>
-
-        <div className="interest-grid">
-          <div className="interest-card" onClick={() => applyTag("архітектура")}>
-            <span>🏛</span>
-            <h3>Архітектура</h3>
-            <p>Історичні будівлі, ратуша та університет</p>
-          </div>
-
-          <div className="interest-card" onClick={() => applyTag("кава")}>
-            <span>☕</span>
-            <h3>Кав'ярні</h3>
-            <p>Атмосферні місця для кави та відпочинку</p>
-          </div>
-
-          <div className="interest-card" onClick={() => applyTag("історія")}>
-            <span>📚</span>
-            <h3>Історія</h3>
-            <p>Місця, що зберігають дух старих Чернівців</p>
-          </div>
-
-          <div className="interest-card" onClick={() => applyTag("прогулянка")}>
-            <span>🚶</span>
-            <h3>Прогулянка</h3>
-            <p>Парки, площі та красиві міські маршрути</p>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {routeDescription && (
         <section className="route-description-section">
@@ -227,8 +164,8 @@ export default function RouteForm() {
       <section className="places-section">
         <h2>Маршрут прогулянки</h2>
         <p className="section-subtitle">
-          Спочатку відібрані найкращі місця за рейтингом, потім побудований
-          порядок проходження
+          Система визначила теги, обрала найкращі локації за рейтингом і
+          побудувала маршрут
         </p>
 
         <div className="route-line">
@@ -251,9 +188,7 @@ export default function RouteForm() {
               <div className="place-card-content">
                 <h3>{place.name}</h3>
                 <p className="city">{place.city}</p>
-
                 {place.address && <p className="address">{place.address}</p>}
-
                 <p>{place.description}</p>
 
                 <div className="tags">
@@ -263,12 +198,6 @@ export default function RouteForm() {
                 </div>
 
                 <p className="rating">⭐ {place.rating}</p>
-
-                {place.location && (
-                  <p className="coords">
-                    {place.location.lat}, {place.location.lng}
-                  </p>
-                )}
               </div>
             </div>
           ))}

@@ -1,7 +1,7 @@
 const express = require("express")
 const router = express.Router()
 const Place = require("../models/Place")
-const { extractSmartTags } = require("../utils/tagParser")
+const { analyzeInterests, generateDescription } = require("../ai/localAI")
 
 function getDistance(a, b) {
   if (
@@ -75,21 +75,20 @@ function buildGoogleMapsUrl(route) {
   return url
 }
 
-function buildDescription(city, smartTags, places) {
-  if (!places.length) {
-    return `На жаль, для міста ${city} не знайдено локацій за вибраними інтересами.`
-  }
+function normalizeIds(raw) {
+  if (!raw) return []
 
-  const tagsText = smartTags.length ? smartTags.join(", ") : "вільної прогулянки"
-  const names = places.map((place) => place.name).join(" → ")
-
-  return `Маршрут по місту ${city} сформовано на основі розпізнаних інтересів: ${tagsText}. Система автоматично визначила відповідні теги, відібрала локації з найвищим рейтингом, а потім побудувала послідовний маршрут прогулянки: ${names}.`
+  return raw
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
 }
 
 router.get("/", async (req, res) => {
   try {
     const city = req.query.city?.trim()
-    const rawTags = req.query.tags || ""
+    const rawInterests = req.query.tags || ""
+    const limit = parseInt(req.query.limit) || 8
 
     if (!city) {
       return res.status(400).json({
@@ -97,9 +96,9 @@ router.get("/", async (req, res) => {
       })
     }
 
-    const smartTags = extractSmartTags(rawTags)
+    const smartTags = analyzeInterests(rawInterests)
 
-    console.log("Введений текст:", rawTags)
+    console.log("Текст користувача:", rawInterests)
     console.log("Розпізнані теги:", smartTags)
 
     const query = {
@@ -115,21 +114,21 @@ router.get("/", async (req, res) => {
     if (!places.length) {
       return res.json({
         places: [],
-        description: `На жаль, для міста ${city} не знайдено локацій за вибраними інтересами.`,
+        description: `На жаль, для міста ${city} не знайдено локацій за цими інтересами.`,
         googleMapsUrl: "",
         smartTags
       })
     }
 
     places.sort((a, b) => (b.rating || 0) - (a.rating || 0))
-    places = places.slice(0, 5)
+    places = places.slice(0, limit)
 
     const orderedRoute = buildRouteByNearestNeighbor(places).map((place, index) => ({
       ...place.toObject(),
       order: index + 1
     }))
 
-    const description = buildDescription(city, smartTags, orderedRoute)
+    const description = generateDescription(city, smartTags, orderedRoute)
     const googleMapsUrl = buildGoogleMapsUrl(orderedRoute)
 
     res.json({
@@ -139,9 +138,58 @@ router.get("/", async (req, res) => {
       smartTags
     })
   } catch (error) {
-    console.error(error)
+    console.error("Route error:", error)
     res.status(500).json({
       message: "Помилка генерації маршруту"
+    })
+  }
+})
+
+router.get("/replace", async (req, res) => {
+  try {
+    const city = req.query.city?.trim()
+    const rawInterests = req.query.tags || ""
+    const excludeIds = normalizeIds(req.query.excludeIds)
+
+    if (!city) {
+      return res.status(400).json({
+        message: "Не вказано місто"
+      })
+    }
+
+    const smartTags = analyzeInterests(rawInterests)
+
+    const query = {
+      city: new RegExp(`^${city}$`, "i")
+    }
+
+    if (smartTags.length > 0) {
+      query.tags = { $in: smartTags }
+    }
+
+    let places = await Place.find(query)
+
+    if (excludeIds.length > 0) {
+      places = places.filter((place) => !excludeIds.includes(String(place._id)))
+    }
+
+    if (!places.length) {
+      return res.json({
+        place: null
+      })
+    }
+
+    places.sort((a, b) => (b.rating || 0) - (a.rating || 0))
+
+    const replacement = places[0].toObject()
+
+    res.json({
+      place: replacement
+    })
+  } catch (error) {
+    console.error("Replace route error:", error)
+    res.status(500).json({
+      message: "Помилка заміни місця"
     })
   }
 })
