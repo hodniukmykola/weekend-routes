@@ -3,6 +3,7 @@ const router = express.Router()
 const Place = require("../models/Place")
 const { analyzeInterests, generateDescription } = require("../ai/localAI")
 
+// 📍 Відстань (залишаємо для сортування маршруту)
 function getDistance(a, b) {
   if (
     !a.location ||
@@ -21,6 +22,7 @@ function getDistance(a, b) {
   return Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
 }
 
+// 📍 Побудова маршруту (найближчий сусід)
 function buildRouteByNearestNeighbor(places) {
   if (!places.length) return []
 
@@ -50,20 +52,26 @@ function buildRouteByNearestNeighbor(places) {
   return route
 }
 
+// ✅ GOOGLE MAPS ПО АДРЕСАХ (ГОЛОВНЕ)
 function buildGoogleMapsUrl(route) {
-  if (!route.length) return ""
+  if (!route || route.length === 0) return ""
 
+  // якщо тільки 1 місце
   if (route.length === 1) {
-    const only = route[0]
-    return `https://www.google.com/maps/search/?api=1&query=${only.location.lat},${only.location.lng}`
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      route[0].address || route[0].name
+    )}`
   }
 
-  const origin = `${route[0].location.lat},${route[0].location.lng}`
-  const destination = `${route[route.length - 1].location.lat},${route[route.length - 1].location.lng}`
+  const origin = encodeURIComponent(route[0].address || route[0].name)
+
+  const destination = encodeURIComponent(
+    route[route.length - 1].address || route[route.length - 1].name
+  )
 
   const waypoints = route
     .slice(1, route.length - 1)
-    .map((place) => `${place.location.lat},${place.location.lng}`)
+    .map((place) => encodeURIComponent(place.address || place.name))
     .join("|")
 
   let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`
@@ -75,15 +83,7 @@ function buildGoogleMapsUrl(route) {
   return url
 }
 
-function normalizeIds(raw) {
-  if (!raw) return []
-
-  return raw
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean)
-}
-
+// 🚀 ОСНОВНИЙ ROUTE
 router.get("/", async (req, res) => {
   try {
     const city = req.query.city?.trim()
@@ -96,10 +96,11 @@ router.get("/", async (req, res) => {
       })
     }
 
+    // 🧠 "AI" аналіз (локальний)
     const smartTags = analyzeInterests(rawInterests)
 
-    console.log("Текст користувача:", rawInterests)
-    console.log("Розпізнані теги:", smartTags)
+    console.log("Текст:", rawInterests)
+    console.log("Теги:", smartTags)
 
     const query = {
       city: new RegExp(`^${city}$`, "i")
@@ -114,21 +115,30 @@ router.get("/", async (req, res) => {
     if (!places.length) {
       return res.json({
         places: [],
-        description: `На жаль, для міста ${city} не знайдено локацій за цими інтересами.`,
+        description: `На жаль, для міста ${city} не знайдено локацій.`,
         googleMapsUrl: "",
         smartTags
       })
     }
 
+    // ⭐ сортування по рейтингу
     places.sort((a, b) => (b.rating || 0) - (a.rating || 0))
+
+    // ✂ беремо топ N
     places = places.slice(0, limit)
 
-    const orderedRoute = buildRouteByNearestNeighbor(places).map((place, index) => ({
-      ...place.toObject(),
-      order: index + 1
-    }))
+    // 📍 будуємо маршрут
+    const orderedRoute = buildRouteByNearestNeighbor(places).map(
+      (place, index) => ({
+        ...place.toObject(),
+        order: index + 1
+      })
+    )
 
+    // 📝 опис
     const description = generateDescription(city, smartTags, orderedRoute)
+
+    // 🗺️ Google Maps
     const googleMapsUrl = buildGoogleMapsUrl(orderedRoute)
 
     res.json({
@@ -141,55 +151,6 @@ router.get("/", async (req, res) => {
     console.error("Route error:", error)
     res.status(500).json({
       message: "Помилка генерації маршруту"
-    })
-  }
-})
-
-router.get("/replace", async (req, res) => {
-  try {
-    const city = req.query.city?.trim()
-    const rawInterests = req.query.tags || ""
-    const excludeIds = normalizeIds(req.query.excludeIds)
-
-    if (!city) {
-      return res.status(400).json({
-        message: "Не вказано місто"
-      })
-    }
-
-    const smartTags = analyzeInterests(rawInterests)
-
-    const query = {
-      city: new RegExp(`^${city}$`, "i")
-    }
-
-    if (smartTags.length > 0) {
-      query.tags = { $in: smartTags }
-    }
-
-    let places = await Place.find(query)
-
-    if (excludeIds.length > 0) {
-      places = places.filter((place) => !excludeIds.includes(String(place._id)))
-    }
-
-    if (!places.length) {
-      return res.json({
-        place: null
-      })
-    }
-
-    places.sort((a, b) => (b.rating || 0) - (a.rating || 0))
-
-    const replacement = places[0].toObject()
-
-    res.json({
-      place: replacement
-    })
-  } catch (error) {
-    console.error("Replace route error:", error)
-    res.status(500).json({
-      message: "Помилка заміни місця"
     })
   }
 })
